@@ -1,0 +1,90 @@
+<div class="triple">
+  <% has_support_permission = has_support_permission?(Catalog::PacksController::SUPPORT_PERMISSION_PACK_MANAGEMENT)
+         org_ns_path = nil
+  if has_support_permission
+    quick_filters = [{:label => 'All', :value => '', :selected => true},
+                     {:label => 'Enabled or Restricted', :value => 'visibility=(enabled)|(restricted)'},
+                     {:label => 'Enabled', :value => 'visibility=enabled'},
+                     {:label => 'Restricted', :value => 'visibility=restricted'},
+                     {:label => 'Disabled', :value => 'visibility=disabled'}]
+  else
+      org_ns_path = organization_ns_path
+      quick_filters = [{:label => 'All', :value => ''},
+                       {:label => 'Enabled', :value => 'visibility=enabled', :selected => true},
+                       {:label => 'Disabled', :value => 'visibility=disabled'}]
+  end
+
+  %>
+
+  <%= list(@packs,
+           :toolbar => {:list_name     => 'pack_list',
+                        :sort_by       => [%w(Name name), %w(Category category), %w(Source source)],
+                        :filter_by     => %w(name category source version visibility owner),
+                        :quick_filters => quick_filters}) do |builder, pack_info| %>
+    <% versions = pack_info[:versions].sort_by do |v|
+         s = v.ciName.split('.')
+         -(s[0].to_i * 100000 + s[1].to_i * 100 + s[2].to_i)
+       end
+
+       if has_support_permission
+         enabled_ci = versions.find {|v| v.ciAttributes.enabled != 'false'}
+         restricted_ci = versions.find {|v| v.ciAttributes.enabled == 'false' && v.altNs.attributes[Catalog::PacksController::ORG_VISIBILITY_ALT_NS_TAG].present?}
+         disabled   = !restricted_ci && !enabled_ci
+         restricted = !enabled_ci && restricted_ci
+         version_ci = enabled_ci || restricted || versions.first
+       else
+         version_ci = versions.find {|v| v.ciAttributes.enabled != 'false' || v.altNs.attributes[Catalog::PacksController::ORG_VISIBILITY_ALT_NS_TAG].try(:include?, org_ns_path)}
+         restricted = false
+         disabled   = version_ci.blank?
+         version_ci ||= versions.first
+       end
+
+       pack_ci   = pack_info[:pack]
+       pack_name = pack_ci.ciName
+       source    = pack_ci.nsPath.split('/')[2]
+       version   = version_ci.ciName
+       category  = pack_ci.ciAttributes.category
+       owner     = pack_ci.ciAttributes.owner
+       desc      = pack_ci.ciAttributes.description.presence
+       desc      = nil if desc.blank? || desc.size <= pack_ci.ciName.size %>
+    <% builder.itemid pack_ci.ciId %>
+    <% builder.attributes raw(%(name="#{pack_name}" category="#{category}" version="#{pack_info[:versions].map(&:ciName).join(',')}" source="#{source}" owner="#{owner}" visibility="#{restricted ? 'restricted' : (disabled ? 'disabled' : 'enabled')}")) %>
+    <% builder.status do %>
+      <%= marker(category, 'label-info') %>
+      <% if restricted %>
+        <%= marker('restricted', 'label-warning') %>
+      <% elsif disabled %>
+        <%= marker('disabled', 'label-important') %>
+      <% end %>
+    <% end %>
+    <% builder.icon pack_image_url(source, pack_name, version) %>
+    <% builder.top do %>
+      <small class="muted"><%= source %> </small>
+      <%= link_to(catalog_pack_platform_path(source, pack_name, version, nil, pack_name)) do %>
+        <%= pack_name %> <%= content_tag(:small, "ver.#{version}", :class => pack_version_text_class(version_ci, org_ns_path)) %>
+      <% end %>
+      <% if has_support_permission && version_ci.ciAttributes.enabled == 'false' %>
+        <% visibility = version_ci.altNs.attributes[Catalog::PacksController::ORG_VISIBILITY_ALT_NS_TAG] %>
+        <% if visibility.present? %>
+          <small class="topdesc"> (<%= expandable_list(visibility.map {|ns| ns.split('/')[1]}) %>)</small>
+        <% end %>
+      <% end %>
+    <% end %>
+    <% builder.middle do %>
+      <%= link_to(icon(site_icon(:design),                 'design'),    catalog_pack_platform_path(source, pack_name, version, nil, pack_name)) %>&nbsp;&nbsp;|&nbsp;&nbsp;
+      <%= link_to(icon(site_icon(:single_availability),    'single'),    catalog_pack_platform_path(source, pack_name, version, 'single', pack_name)) %> &nbsp;&nbsp;|&nbsp;&nbsp;
+      <%= link_to(icon(site_icon(:redundant_availability), 'redundant'), catalog_pack_platform_path(source, pack_name, version, 'redundant', pack_name)) %>
+      <% if versions.size > 1 %>
+        <% other_versions = versions.reject {|v| v.ciName == version_ci.ciName} %>
+        <br><br>
+        Other versions: <%= render 'pack_version_list', :versions => other_versions %>
+      <% end %>
+    <% end %>
+    <% if owner.present? || desc.present? %>
+      <% builder.bottom do %>
+        <%= icon('user', "#{owner}&nbsp;&nbsp;&nbsp;") if owner.present? %>
+        <%= icon('comment', desc) if desc.present? %>
+      <% end %>
+    <% end %>
+  <% end %>
+</div>

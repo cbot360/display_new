@@ -1,0 +1,5 @@
+<% if @environment.ciState == 'locked' %>
+  setTimeout(refresh_compile_status, 5000);
+<% else %>
+  $j("#overlay").html("<%= escape_javascript(render('deployment')) %>");
+<% end %>
